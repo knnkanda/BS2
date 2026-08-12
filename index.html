@@ -221,7 +221,7 @@
       <!-- 右列: 負債・純資産の部 -->
       <div class="bs-col">
         <div class="bs-block bg-current-liab" id="bCurrentLiab">
-          <div class="bs-block-title">流動負債</div>
+          <div class="bs-block-title" id="tCurrentLiab">流動負債</div>
           <div class="bs-block-val" id="vCurrentLiab">-</div>
           <div class="bs-block-pct" id="pCurrentLiab">(-)</div>
         </div>
@@ -291,19 +291,36 @@ function parseText(text) {
   }
 
   function getLatestValue(keyword) {
-    const index = lines.findIndex(line => line.includes(keyword));
+    // Google Financeでは科目名が独立した行になるため、類似科目の誤取得を防ぐ。
+    // 「総資産」「総負債」はグラフ凡例にも出るので、詳細表側の最後の一致を使う。
+    let index = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i] === keyword) {
+        index = i;
+        break;
+      }
+    }
     if (index === -1) return null;
 
     const values = [];
     for (let i = index + 1; i < lines.length && values.length < 4; i++) {
       const line = lines[i];
-      if (/^-?[\d,]+(\.\d+)?(兆|億|%)?$/.test(line) || line === '-') {
+      // 割合（例: 2.20%）は金額として扱わない。
+      if (/^-?[\d,]+(\.\d+)?(兆|億)?$/.test(line) || line === '-') {
         values.push(line);
       } else if (values.length > 0) {
         break;
       }
     }
     return values.length > 0 ? values[values.length - 1] : null;
+  }
+
+  function getFirstAvailableValue(keywords) {
+    for (const keyword of keywords) {
+      const value = getLatestValue(keyword);
+      if (value !== null && value !== '-') return value;
+    }
+    return null;
   }
 
   function parseToTrillion(valStr) {
@@ -327,19 +344,32 @@ function parseText(text) {
     marketCapTrillion = (stockPrice * (sharesNum * 1000000000000)) / 1000000000000;
   }
 
-  const currentAssets = parseToTrillion(getLatestValue('流動資産合計'));
+  const currentAssets = parseToTrillion(getFirstAvailableValue(['流動資産合計', '流動資産']));
   const totalAssets = parseToTrillion(getLatestValue('総資産'));
+  const directFixedAssets = getFirstAvailableValue(['固定資産合計', '固定資産']);
   const totalLiabilities = parseToTrillion(getLatestValue('総負債'));
-  const equity = parseToTrillion(getLatestValue('純資産') || getLatestValue('普通株主資本の合計'));
-  
+  const equity = parseToTrillion(getFirstAvailableValue([
+    '資本合計', '純資産合計', '純資産', '株主資本合計', '普通株主資本の合計'
+  ]));
+
+  // Google Financeに「流動負債合計」がない場合は、取得可能な内訳から概算する。
+  const directCurrentLiabilities = getFirstAvailableValue(['流動負債合計', '流動負債']);
   const payables = parseToTrillion(getLatestValue('買掛金の合計'));
   const shortBorrowing = parseToTrillion(getLatestValue('短期借入金'));
-  const shortLease = parseToTrillion(getLatestValue('一年以内返済長期借入金') || getLatestValue('リース負債（流動）'));
+  const currentLongTermDebt = parseToTrillion(getLatestValue('一年以内返済長期借入金'));
+  const currentLease = parseToTrillion(getLatestValue('リース負債（流動）'));
+  const currentDeferredRevenue = parseToTrillion(getLatestValue('前受収益（流動）の合計'));
+  const otherCurrentLiabilities = parseToTrillion(getLatestValue('その他の流動負債の合計'));
 
   // B/S 整合性重視の逆算ロジック
-  const fixedAssets = (totalAssets > 0 && currentAssets > 0) ? (totalAssets - currentAssets) : 0;
-  const currentLiabilities = payables + shortBorrowing + shortLease;
-  const fixedLiabilities = (totalLiabilities > currentLiabilities) ? (totalLiabilities - currentLiabilities) : 0;
+  const fixedAssets = directFixedAssets === null
+    ? Math.max(0, totalAssets - currentAssets)
+    : parseToTrillion(directFixedAssets);
+  const currentLiabilitiesEstimated = directCurrentLiabilities === null;
+  const currentLiabilities = currentLiabilitiesEstimated
+    ? payables + shortBorrowing + currentLongTermDebt + currentLease + currentDeferredRevenue + otherCurrentLiabilities
+    : parseToTrillion(directCurrentLiabilities);
+  const fixedLiabilities = Math.max(0, totalLiabilities - currentLiabilities);
 
   // 借方・貸方の絶対比較 (Wチェック)
   const debitTotal = currentAssets + fixedAssets; // 総資産
@@ -354,7 +384,7 @@ function parseText(text) {
     marketCap: marketCapTrillion > 0 ? `${marketCapTrillion.toFixed(2)}兆円` : "不明",
     isBalanced: isBalanced,
     diff: diff.toFixed(2),
-    raw: { currentAssets, fixedAssets, currentLiabilities, fixedLiabilities, equity, totalAssets: debitTotal, totalCredit: creditTotal }
+    raw: { currentAssets, fixedAssets, currentLiabilities, currentLiabilitiesEstimated, fixedLiabilities, equity, totalAssets: debitTotal, totalCredit: creditTotal }
   };
 }
 
@@ -362,6 +392,10 @@ function runExtraction() {
   const text = document.getElementById('inputText').value;
   const data = parseText(text);
   const raw = data.raw;
+
+  document.getElementById('tCurrentLiab').textContent = raw.currentLiabilitiesEstimated
+    ? '流動負債（概算）'
+    : '流動負債';
 
   if (raw.totalAssets === 0) {
     alert("財務データの抽出に失敗しました。");
@@ -376,7 +410,7 @@ function runExtraction() {
     alertBox.innerHTML = `✅ 貸借一致チェック通過 (資産: ${raw.totalAssets.toFixed(2)}兆円 ＝ 負債・純資産: ${raw.totalCredit.toFixed(2)}兆円)`;
   } else {
     alertBox.className = 'alert-box alert-warning';
-    alertBox.innerHTML = `⚠️ 貸借が一致していません（差額: ${data.diff}兆円）。一部の非流動負債項目が元テキストに含まれていない可能性があります。`;
+    alertBox.innerHTML = `⚠️ 貸借が一致していません（差額: ${data.diff}兆円）。科目の欠落、年度の不一致、または入力形式を確認してください。`;
   }
 
   const currentRatio = raw.currentLiabilities > 0 ? ((raw.currentAssets / raw.currentLiabilities) * 100).toFixed(1) : "-";
@@ -436,6 +470,7 @@ function runExtraction() {
       totalAssets: raw.totalAssets.toFixed(2) + "兆円",
       totalCredit: raw.totalCredit.toFixed(2) + "兆円"
     },
+    currentLiabilitiesEstimated: raw.currentLiabilitiesEstimated,
     percentages: { caPct, faPct, clPct, flPct, eqPct }
   };
 }
@@ -478,7 +513,7 @@ function downloadMarkdown() {
 | **固定資産** | ${d.bsData.fixedAssets} | ${d.percentages.faPct}% |
 | **資産合計** | **${d.bsData.totalAssets}** | **100.0%** |
 | | | |
-| **流動負債** | ${d.bsData.currentLiabilities} | ${d.percentages.clPct}% |
+| **${d.currentLiabilitiesEstimated ? '流動負債（概算）' : '流動負債'}** | ${d.bsData.currentLiabilities} | ${d.percentages.clPct}% |
 | **固定負債** | ${d.bsData.fixedLiabilities} | ${d.percentages.flPct}% |
 | **資本合計 (純資産)** | ${d.bsData.equity} | ${d.percentages.eqPct}% |
 | **負債・純資産合計** | **${d.bsData.totalCredit}** | **100.0%** |
