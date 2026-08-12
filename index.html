@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>B/S テキスト抽出 & ビジュアル化ツール</title>
+  <!-- html2canvas: グラフエリア画像化ライブラリ -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: #f1f5f9;
+      color: #334155;
+      max-width: 900px;
+      margin: 30px auto;
+      padding: 20px;
+    }
+    .card {
+      background: #ffffff;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+      margin-bottom: 24px;
+    }
+    h1 { font-size: 1.25rem; margin-top: 0; color: #0f172a; }
+    textarea {
+      width: 100%;
+      height: 140px;
+      padding: 12px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      box-sizing: border-box;
+      font-family: monospace;
+      font-size: 13px;
+      margin-bottom: 12px;
+    }
+    .btn-primary {
+      width: 100%;
+      background-color: #2563eb;
+      color: white;
+      border: none;
+      padding: 12px;
+      border-radius: 8px;
+      font-weight: bold;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    .btn-primary:hover { background-color: #1d4ed8; }
+
+    /* Wチェック（貸借一致）用アラート */
+    .alert-box {
+      padding: 12px 16px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      font-weight: bold;
+      font-size: 0.9rem;
+      display: none;
+    }
+    .alert-success { background-color: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+    .alert-warning { background-color: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+
+    /* 指標カード */
+    .metrics-container {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .metric-card {
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 16px;
+      text-align: center;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .metric-title { font-size: 0.875rem; font-weight: bold; color: #475569; }
+    .metric-value { font-size: 1.75rem; font-weight: 800; margin: 8px 0 4px 0; }
+    .metric-desc { font-size: 0.75rem; color: #94a3b8; }
+
+    /* B/S ビジュアル */
+    .bs-header { text-align: center; margin-bottom: 20px; }
+    .bs-company-title { font-size: 1.5rem; font-weight: bold; color: #0f172a; }
+    .bs-info-sub { font-size: 0.9rem; color: #475569; margin-top: 4px; }
+    .bs-subtitle { font-size: 0.85rem; color: #64748b; margin-top: 2px; }
+
+    .bs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .bs-col { display: flex; flex-direction: column; gap: 12px; }
+    .bs-block {
+      border-radius: 12px;
+      padding: 20px;
+      color: white;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+      transition: all 0.3s ease;
+    }
+    .bs-block-title { font-size: 1.1rem; font-weight: bold; margin-bottom: 6px; }
+    .bs-block-val { font-size: 1.5rem; font-weight: 800; }
+    .bs-block-pct { font-size: 0.875rem; opacity: 0.9; }
+
+    .bg-current-assets { background-color: #34d399; }
+    .bg-fixed-assets   { background-color: #10b981; }
+    .bg-current-liab   { background-color: #f87171; }
+    .bg-fixed-liab     { background-color: #ef4444; }
+    .bg-equity         { background-color: #facc15; color: #78350f; text-shadow: none; }
+
+    .bs-footer {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      text-align: center;
+      margin-top: 16px;
+      padding-top: 12px;
+      font-weight: bold;
+    }
+
+    /* アクションボタン群 */
+    .action-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .btn-action {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: bold;
+      border: none;
+      cursor: pointer;
+    }
+    .btn-download { background-color: #2563eb; color: white; }
+    .btn-save-json { background-color: #059669; color: white; }
+    .btn-save-md { background-color: #0891b2; color: white; }
+    .btn-embed { background-color: #475569; color: white; }
+
+    .modal {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.5);
+      align-items: center; justify-content: center;
+    }
+    .modal-content {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      max-width: 600px;
+      width: 90%;
+    }
+    pre {
+      background: #0f172a;
+      color: #38bdf8;
+      padding: 16px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="card">
+  <h1>📋 B/S テキスト抽出 & ビジュアル化ツール</h1>
+  <textarea id="inputText" placeholder="ここに Google Finance や Yahoo!ファイナンス等のテキストを貼り付けてください..."></textarea>
+  <button class="btn-primary" onclick="runExtraction()">データを抽出してグラフ化</button>
+</div>
+
+<!-- 1. 財務指標カード -->
+<div class="metrics-container" id="metricsContainer" style="display: none;">
+  <div class="metric-card">
+    <div class="metric-title">流動比率</div>
+    <div class="metric-value" id="mCurrentRatio" style="color: #2563eb;">--</div>
+    <div class="metric-desc">(流動資産 / 流動負債) × 100</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-title">固定比率</div>
+    <div class="metric-value" id="mFixedRatio" style="color: #059669;">--</div>
+    <div class="metric-desc">(固定資産 / 自己資本) × 100</div>
+  </div>
+  <div class="metric-card">
+    <div class="metric-title">自己資本比率</div>
+    <div class="metric-value" id="mEquityRatio" style="color: #9333ea;">--</div>
+    <div class="metric-desc">(資本合計 / 資産合計) × 100</div>
+  </div>
+</div>
+
+<!-- 2. B/S グラフカード -->
+<div class="card" id="bsGraphCard" style="display: none;">
+
+  <!-- Wチェック（貸借一致）結果通知バー -->
+  <div id="checkResultAlert" class="alert-box"></div>
+
+  <div id="captureArea" style="padding: 16px; background: white; border-radius: 12px;">
+    <div class="bs-header">
+      <div class="bs-company-title" id="dispCompany">企業名</div>
+      <div class="bs-info-sub" id="dispStockPrice">株価: -- | 時価総額: --</div>
+      <div class="bs-subtitle">貸借対照表 (最新期)</div>
+    </div>
+
+    <div class="bs-grid">
+      <!-- 左列: 資産の部 -->
+      <div class="bs-col">
+        <div class="bs-block bg-current-assets" id="bCurrentAssets">
+          <div class="bs-block-title">流動資産</div>
+          <div class="bs-block-val" id="vCurrentAssets">-</div>
+          <div class="bs-block-pct" id="pCurrentAssets">(-)</div>
+        </div>
+        <div class="bs-block bg-fixed-assets" id="bFixedAssets">
+          <div class="bs-block-title">固定資産</div>
+          <div class="bs-block-val" id="vFixedAssets">-</div>
+          <div class="bs-block-pct" id="pFixedAssets">(-)</div>
+        </div>
+      </div>
+
+      <!-- 右列: 負債・純資産の部 -->
+      <div class="bs-col">
+        <div class="bs-block bg-current-liab" id="bCurrentLiab">
+          <div class="bs-block-title">流動負債</div>
+          <div class="bs-block-val" id="vCurrentLiab">-</div>
+          <div class="bs-block-pct" id="pCurrentLiab">(-)</div>
+        </div>
+        <div class="bs-block bg-fixed-liab" id="bFixedLiab">
+          <div class="bs-block-title">固定負債</div>
+          <div class="bs-block-val" id="vFixedLiab">-</div>
+          <div class="bs-block-pct" id="pFixedLiab">(-)</div>
+        </div>
+        <div class="bs-block bg-equity" id="bEquity">
+          <div class="bs-block-title">資本合計</div>
+          <div class="bs-block-val" id="vEquity">-</div>
+          <div class="bs-block-pct" id="pEquity">(-)</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="bs-footer">
+      <div>資産合計: <span id="vTotalAssets">-</span></div>
+      <div>負債・純資産合計: <span id="vTotalLiabEquity">-</span></div>
+    </div>
+  </div>
+
+  <div class="action-buttons">
+    <button class="btn-action btn-download" onclick="downloadImage()">🖼️ 画像保存</button>
+    <button class="btn-action btn-save-json" onclick="downloadJSON()">📄 JSON保存</button>
+    <button class="btn-action btn-save-md" onclick="downloadMarkdown()">📝 Markdown保存</button>
+    <button class="btn-action btn-embed" onclick="showEmbedModal()">&lt;&gt; 埋め込み</button>
+  </div>
+</div>
+
+<div class="modal" id="embedModal" onclick="closeEmbedModal(event)">
+  <div class="modal-content">
+    <h3>&lt;&gt; 埋め込みHTMLコード</h3>
+    <pre id="embedCodeText"></pre>
+    <button class="btn-primary" onclick="copyEmbedCode()">コードをコピー</button>
+  </div>
+</div>
+
+<script>
+let lastExtractedData = null;
+
+function parseText(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+  let companyName = null;
+  let stockCode = null;
+  let stockPrice = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (/\b\d{3,4}[A-Za-z]?:[A-Za-z]+\b|\b[A-Za-z]+:\s*\d{3,4}[A-Za-z]?\b/.test(line)) {
+      stockCode = line;
+      for (let j = Math.max(0, i - 2); j <= Math.min(lines.length - 1, i + 3); j++) {
+        if (j === i) continue;
+        const candidate = lines[j];
+        if (candidate && !candidate.includes('ホーム') && !candidate.includes('arrow') && !candidate.startsWith('¥') && candidate.length >= 2) {
+          companyName = candidate;
+          break;
+        }
+      }
+    }
+
+    if (/^¥[\d,]+(\.\d+)?$/.test(line) && !stockPrice) {
+      stockPrice = parseFloat(line.replace('¥', '').replace(/,/g, ''));
+    }
+  }
+
+  function getLatestValue(keyword) {
+    const index = lines.findIndex(line => line.includes(keyword));
+    if (index === -1) return null;
+
+    const values = [];
+    for (let i = index + 1; i < lines.length && values.length < 4; i++) {
+      const line = lines[i];
+      if (/^-?[\d,]+(\.\d+)?(兆|億|%)?$/.test(line) || line === '-') {
+        values.push(line);
+      } else if (values.length > 0) {
+        break;
+      }
+    }
+    return values.length > 0 ? values[values.length - 1] : null;
+  }
+
+  function parseToTrillion(valStr) {
+    if (!valStr || valStr === '-') return 0;
+    let num = 0;
+    if (valStr.includes('兆')) {
+      num = parseFloat(valStr.replace('兆', '').replace(/,/g, ''));
+    } else if (valStr.includes('億')) {
+      num = parseFloat(valStr.replace('億', '').replace(/,/g, '')) / 10000;
+    } else {
+      num = parseFloat(valStr.replace(/,/g, '')) || 0;
+    }
+    return num;
+  }
+
+  const sharesStr = getLatestValue('発行済株式数');
+  const sharesNum = parseToTrillion(sharesStr);
+
+  let marketCapTrillion = 0;
+  if (stockPrice && sharesNum) {
+    marketCapTrillion = (stockPrice * (sharesNum * 1000000000000)) / 1000000000000;
+  }
+
+  const currentAssets = parseToTrillion(getLatestValue('流動資産合計'));
+  const totalAssets = parseToTrillion(getLatestValue('総資産'));
+  const totalLiabilities = parseToTrillion(getLatestValue('総負債'));
+  const equity = parseToTrillion(getLatestValue('純資産') || getLatestValue('普通株主資本の合計'));
+  
+  const payables = parseToTrillion(getLatestValue('買掛金の合計'));
+  const shortBorrowing = parseToTrillion(getLatestValue('短期借入金'));
+  const shortLease = parseToTrillion(getLatestValue('一年以内返済長期借入金') || getLatestValue('リース負債（流動）'));
+
+  // B/S 整合性重視の逆算ロジック
+  const fixedAssets = (totalAssets > 0 && currentAssets > 0) ? (totalAssets - currentAssets) : 0;
+  const currentLiabilities = payables + shortBorrowing + shortLease;
+  const fixedLiabilities = (totalLiabilities > currentLiabilities) ? (totalLiabilities - currentLiabilities) : 0;
+
+  // 借方・貸方の絶対比較 (Wチェック)
+  const debitTotal = currentAssets + fixedAssets; // 総資産
+  const creditTotal = totalLiabilities + equity;   // 負債 + 純資産
+  const diff = Math.abs(debitTotal - creditTotal);
+  const isBalanced = diff < 0.1; // 端数誤差（1000億円未満）を許容
+
+  return {
+    companyName: companyName || "対象企業",
+    stockCode: stockCode || "",
+    stockPrice: stockPrice ? `¥${stockPrice.toLocaleString()}` : "不明",
+    marketCap: marketCapTrillion > 0 ? `${marketCapTrillion.toFixed(2)}兆円` : "不明",
+    isBalanced: isBalanced,
+    diff: diff.toFixed(2),
+    raw: { currentAssets, fixedAssets, currentLiabilities, fixedLiabilities, equity, totalAssets: debitTotal, totalCredit: creditTotal }
+  };
+}
+
+function runExtraction() {
+  const text = document.getElementById('inputText').value;
+  const data = parseText(text);
+  const raw = data.raw;
+
+  if (raw.totalAssets === 0) {
+    alert("財務データの抽出に失敗しました。");
+    return;
+  }
+
+  // Wチェック結果の画面表示
+  const alertBox = document.getElementById('checkResultAlert');
+  alertBox.style.display = 'block';
+  if (data.isBalanced) {
+    alertBox.className = 'alert-box alert-success';
+    alertBox.innerHTML = `✅ 貸借一致チェック通過 (資産: ${raw.totalAssets.toFixed(2)}兆円 ＝ 負債・純資産: ${raw.totalCredit.toFixed(2)}兆円)`;
+  } else {
+    alertBox.className = 'alert-box alert-warning';
+    alertBox.innerHTML = `⚠️ 貸借が一致していません（差額: ${data.diff}兆円）。一部の非流動負債項目が元テキストに含まれていない可能性があります。`;
+  }
+
+  const currentRatio = raw.currentLiabilities > 0 ? ((raw.currentAssets / raw.currentLiabilities) * 100).toFixed(1) : "-";
+  const fixedRatio = raw.equity > 0 ? ((raw.fixedAssets / raw.equity) * 100).toFixed(1) : "-";
+  const equityRatio = raw.totalAssets > 0 ? ((raw.equity / raw.totalAssets) * 100).toFixed(1) : "-";
+
+  document.getElementById('mCurrentRatio').textContent = currentRatio + "%";
+  document.getElementById('mFixedRatio').textContent = fixedRatio + "%";
+  document.getElementById('mEquityRatio').textContent = equityRatio + "%";
+
+  document.getElementById('dispCompany').textContent = `${data.companyName} ${data.stockCode ? '(' + data.stockCode + ')' : ''}`;
+  document.getElementById('dispStockPrice').textContent = `株価: ${data.stockPrice} | 時価総額: ${data.marketCap}`;
+
+  const caPct = ((raw.currentAssets / raw.totalAssets) * 100).toFixed(1);
+  const faPct = ((raw.fixedAssets / raw.totalAssets) * 100).toFixed(1);
+  const clPct = ((raw.currentLiabilities / raw.totalCredit) * 100).toFixed(1);
+  const flPct = ((raw.fixedLiabilities / raw.totalCredit) * 100).toFixed(1);
+  const eqPct = ((raw.equity / raw.totalCredit) * 100).toFixed(1);
+
+  document.getElementById('vCurrentAssets').textContent = raw.currentAssets.toFixed(2) + "兆円";
+  document.getElementById('pCurrentAssets').textContent = `(${caPct}%)`;
+  document.getElementById('vFixedAssets').textContent = raw.fixedAssets.toFixed(2) + "兆円";
+  document.getElementById('pFixedAssets').textContent = `(${faPct}%)`;
+
+  document.getElementById('vCurrentLiab').textContent = raw.currentLiabilities.toFixed(2) + "兆円";
+  document.getElementById('pCurrentLiab').textContent = `(${clPct}%)`;
+  document.getElementById('vFixedLiab').textContent = raw.fixedLiabilities.toFixed(2) + "兆円";
+  document.getElementById('pFixedLiab').textContent = `(${flPct}%)`;
+  document.getElementById('vEquity').textContent = raw.equity.toFixed(2) + "兆円";
+  document.getElementById('pEquity').textContent = `(${eqPct}%)`;
+
+  document.getElementById('vTotalAssets').textContent = raw.totalAssets.toFixed(2) + "兆円 (100%)";
+  document.getElementById('vTotalLiabEquity').textContent = raw.totalCredit.toFixed(2) + "兆円 (100%)";
+
+  document.getElementById('bCurrentAssets').style.flex = caPct;
+  document.getElementById('bFixedAssets').style.flex = faPct;
+  document.getElementById('bCurrentLiab').style.flex = clPct;
+  document.getElementById('bFixedLiab').style.flex = flPct;
+  document.getElementById('bEquity').style.flex = eqPct;
+
+  document.getElementById('metricsContainer').style.display = 'grid';
+  document.getElementById('bsGraphCard').style.display = 'block';
+
+  lastExtractedData = {
+    companyName: data.companyName,
+    stockCode: data.stockCode,
+    stockPrice: data.stockPrice,
+    marketCap: data.marketCap,
+    isBalanced: data.isBalanced,
+    metrics: { currentRatio, fixedRatio, equityRatio },
+    bsData: {
+      currentAssets: raw.currentAssets.toFixed(2) + "兆円",
+      fixedAssets: raw.fixedAssets.toFixed(2) + "兆円",
+      currentLiabilities: raw.currentLiabilities.toFixed(2) + "兆円",
+      fixedLiabilities: raw.fixedLiabilities.toFixed(2) + "兆円",
+      equity: raw.equity.toFixed(2) + "兆円",
+      totalAssets: raw.totalAssets.toFixed(2) + "兆円",
+      totalCredit: raw.totalCredit.toFixed(2) + "兆円"
+    },
+    percentages: { caPct, faPct, clPct, flPct, eqPct }
+  };
+}
+
+function saveFile(filename, content, type) {
+  const blob = new Blob([content], { type: type });
+  const link = document.createElement('a');
+  link.href = URL.createObjectURL(blob);
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
+function downloadJSON() {
+  if (!lastExtractedData) return;
+  saveFile(`BS_${lastExtractedData.companyName}_${new Date().toISOString().slice(0,10)}.json`, JSON.stringify(lastExtractedData, null, 2), 'application/json');
+}
+
+function downloadMarkdown() {
+  if (!lastExtractedData) return;
+  const d = lastExtractedData;
+  const mdContent = `# 📊 ${d.companyName} (${d.stockCode}) 財務サマリー
+
+- **株価**: ${d.stockPrice}
+- **時価総額**: ${d.marketCap}
+- **貸借一致チェック**: ${d.isBalanced ? '✅ 一致' : '⚠️ 不一致'}
+- **取得日**: ${new Date().toLocaleDateString('ja-JP')}
+
+## 💡 主要財務指標
+| 指標 | 数値 | 計算式 |
+| --- | --- | --- |
+| **流動比率** | **${d.metrics.currentRatio}%** | (流動資産 / 流動負債) × 100 |
+| **固定比率** | **${d.metrics.fixedRatio}%** | (固定資産 / 自己資本) × 100 |
+| **自己資本比率** | **${d.metrics.equityRatio}%** | (資本合計 / 資産合計) × 100 |
+
+## 🏢 貸借対照表 内訳 (最新期)
+| 科目 | 金額 | 構成比 |
+| --- | --- | --- |
+| **流動資産** | ${d.bsData.currentAssets} | ${d.percentages.caPct}% |
+| **固定資産** | ${d.bsData.fixedAssets} | ${d.percentages.faPct}% |
+| **資産合計** | **${d.bsData.totalAssets}** | **100.0%** |
+| | | |
+| **流動負債** | ${d.bsData.currentLiabilities} | ${d.percentages.clPct}% |
+| **固定負債** | ${d.bsData.fixedLiabilities} | ${d.percentages.flPct}% |
+| **資本合計 (純資産)** | ${d.bsData.equity} | ${d.percentages.eqPct}% |
+| **負債・純資産合計** | **${d.bsData.totalCredit}** | **100.0%** |
+`;
+  saveFile(`BS_${d.companyName}_${new Date().toISOString().slice(0,10)}.md`, mdContent, 'text/markdown');
+}
+
+function downloadImage() {
+  const target = document.getElementById('captureArea');
+  html2canvas(target, { scale: 2 }).then(canvas => {
+    const link = document.createElement('a');
+    link.download = `BS_Graph_${new Date().toISOString().slice(0,10)}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  });
+}
+
+function showEmbedModal() {
+  const htmlContent = document.getElementById('captureArea').outerHTML;
+  document.getElementById('embedCodeText').textContent = `<!-- B/S Graph Embed -->\n<div style="max-width:700px; margin:0 auto; font-family:sans-serif;">\n${htmlContent}\n</div>`;
+  document.getElementById('embedModal').style.display = 'flex';
+}
+
+function closeEmbedModal(e) {
+  if (e.target.id === 'embedModal') document.getElementById('embedModal').style.display = 'none';
+}
+
+function copyEmbedCode() {
+  navigator.clipboard.writeText(document.getElementById('embedCodeText').textContent).then(() => alert("コピーしました！"));
+}
+</script>
+
+</body>
+</html>
