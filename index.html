@@ -9,6 +9,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700;800&display=swap" rel="stylesheet">
   <!-- html2canvas: グラフエリア画像化ライブラリ -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <!-- PDF.js: PDF内のテキスト抽出 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs" type="module"></script>
   <style>
     body {
       font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -50,6 +52,9 @@
     .draft-actions { display: flex; justify-content: flex-end; gap: 8px; margin: -4px 0 10px; }
     .btn-clear-draft { border: 1px solid rgba(255,255,255,0.35); background: rgba(255,255,255,0.12); color: #ffffff; padding: 7px 12px; border-radius: 999px; cursor: pointer; font-size: 12px; }
     .metadata-display { margin-top: 8px; color: #64748b; font-size: 0.8rem; }
+    .pdf-import { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 0 0 12px; }
+    .pdf-import input { max-width: 100%; color: rgba(255,255,255,0.8); font-size: 12px; }
+    .pdf-status { color: rgba(255,255,255,0.75); font-size: 0.78rem; }
     @media (max-width: 600px) { .metadata-grid, .metrics-container, .bs-grid, .bs-footer { grid-template-columns: 1fr; } }
     .btn-primary {
       width: 100%;
@@ -206,6 +211,11 @@
   </div>
   <p class="source-note">入力項目はすべて任意です。数字は全角・半角のどちらでも入力できます。複数年度の数値がある場合は、各行の右端（最新の数値）だけを使います。</p>
   <div class="draft-actions"><button class="btn-clear-draft" type="button" onclick="clearDraft()">入力内容を消去</button></div>
+  <div class="pdf-import">
+    <label class="btn-clear-draft" for="pdfFile">📄 PDFからB/Sを読み込む</label>
+    <input id="pdfFile" type="file" accept="application/pdf,.pdf" onchange="extractPdfText(event)">
+    <span id="pdfStatus" class="pdf-status"></span>
+  </div>
   <textarea id="inputText" placeholder="ここに Google Finance や Yahoo!ファイナンス等のテキストを貼り付けてください..."></textarea>
   <button class="btn-primary" onclick="runExtraction()">データを抽出してグラフ化</button>
 </div>
@@ -304,6 +314,31 @@
 let lastExtractedData = null;
 const DRAFT_STORAGE_KEY = 'bs2-last-input-v1';
 const DRAFT_FIELD_IDS = ['inputUnit', 'inputCurrency', 'inputAsOfDate', 'inputSourceUrl', 'inputCompanyName', 'inputSymbol', 'inputStockPrice', 'inputMarketCap', 'inputText'];
+
+async function extractPdfText(event) {
+  const file = event.target.files && event.target.files[0];
+  const status = document.getElementById('pdfStatus');
+  if (!file) return;
+  status.textContent = 'PDFを読み込んでいます…';
+  try {
+    const pdfjs = await import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.10.38/pdf.min.mjs');
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjs.getDocument({ data: buffer }).promise;
+    const pages = [];
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+      const page = await pdf.getPage(pageNumber);
+      const content = await page.getTextContent();
+      pages.push(content.items.map(item => item.str).join(' '));
+    }
+    const extractedText = pages.join('\n');
+    document.getElementById('inputText').value = extractedText;
+    saveDraft();
+    status.textContent = `${pdf.numPages}ページのテキストを読み込みました。内容を確認して解析してください。`;
+  } catch (error) {
+    console.error(error);
+    status.textContent = 'PDFを読み込めませんでした。テキスト選択できるPDFか確認してください。';
+  }
+}
 
 function saveDraft() {
   const draft = {};
