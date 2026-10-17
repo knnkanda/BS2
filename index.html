@@ -38,6 +38,8 @@
     .metadata-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; font-weight: bold; color: #475569; }
     .metadata-grid input, .metadata-grid select { padding: 9px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #334155; }
     .source-note { margin: 0 0 12px; color: #64748b; font-size: 0.78rem; }
+    .draft-actions { display: flex; justify-content: flex-end; gap: 8px; margin: -4px 0 10px; }
+    .btn-clear-draft { border: 1px solid #cbd5e1; background: #f8fafc; color: #475569; padding: 7px 10px; border-radius: 7px; cursor: pointer; font-size: 12px; }
     .metadata-display { margin-top: 8px; color: #64748b; font-size: 0.8rem; }
     @media (max-width: 600px) { .metadata-grid, .metrics-container, .bs-grid, .bs-footer { grid-template-columns: 1fr; } }
     .btn-primary {
@@ -192,6 +194,7 @@
     <label>時価総額（任意）<input id="inputMarketCap" type="text" placeholder="例：10.5兆円"></label>
   </div>
   <p class="source-note">入力項目はすべて任意です。数字は全角・半角のどちらでも入力できます。複数年度の数値がある場合は、各行の右端（最新の数値）だけを使います。</p>
+  <div class="draft-actions"><button class="btn-clear-draft" type="button" onclick="clearDraft()">入力内容を消去</button></div>
   <textarea id="inputText" placeholder="ここに Google Finance や Yahoo!ファイナンス等のテキストを貼り付けてください..."></textarea>
   <button class="btn-primary" onclick="runExtraction()">データを抽出してグラフ化</button>
 </div>
@@ -288,6 +291,49 @@
 
 <script>
 let lastExtractedData = null;
+const DRAFT_STORAGE_KEY = 'bs2-last-input-v1';
+const DRAFT_FIELD_IDS = ['inputUnit', 'inputCurrency', 'inputAsOfDate', 'inputSourceUrl', 'inputCompanyName', 'inputSymbol', 'inputStockPrice', 'inputMarketCap', 'inputText'];
+
+function saveDraft() {
+  const draft = {};
+  DRAFT_FIELD_IDS.forEach(id => {
+    const element = document.getElementById(id);
+    if (element) draft[id] = element.value;
+  });
+  localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+}
+
+function restoreDraft() {
+  try {
+    const draft = JSON.parse(localStorage.getItem(DRAFT_STORAGE_KEY) || 'null');
+    if (!draft) return;
+    DRAFT_FIELD_IDS.forEach(id => {
+      const element = document.getElementById(id);
+      if (element && typeof draft[id] === 'string') element.value = draft[id];
+    });
+  } catch (error) {
+    console.warn('保存データを復元できませんでした', error);
+  }
+}
+
+function clearDraft() {
+  localStorage.removeItem(DRAFT_STORAGE_KEY);
+  DRAFT_FIELD_IDS.forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.value = '';
+  });
+  document.getElementById('inputUnit').value = '1000000';
+  document.getElementById('inputCurrency').value = 'JPY';
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  restoreDraft();
+  DRAFT_FIELD_IDS.forEach(id => {
+    const element = document.getElementById(id);
+    if (element) element.addEventListener('input', saveDraft);
+    if (element) element.addEventListener('change', saveDraft);
+  });
+});
 
 function parseText(text) {
   const normalizeWidth = value => value
