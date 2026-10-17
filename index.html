@@ -384,16 +384,17 @@ function parseText(text) {
     marketCapTrillion = (stockPrice * (sharesNum * 1000000000000)) / 1000000000000;
   }
 
-  const currentAssets = parseToTrillion(getFirstAvailableValue(['流動資産合計', '流動資産']));
-  const totalAssets = parseToTrillion(getFirstAvailableValue(['総資産', '資産合計']));
-  const directFixedAssets = getFirstAvailableValue(['固定資産合計', '固定資産', '非流動資産合計', '非流動資産']);
-  const totalLiabilities = parseToTrillion(getFirstAvailableValue(['総負債', '負債合計']));
+  const currentAssets = parseToTrillion(getFirstAvailableValue(['流動資産合計', '流動資産', 'Total current assets', 'Current assets']));
+  const totalAssets = parseToTrillion(getFirstAvailableValue(['総資産', '資産合計', 'Total assets']));
+  const directFixedAssets = getFirstAvailableValue(['固定資産合計', '固定資産', '非流動資産合計', '非流動資産', 'Total non-current assets', 'Non-current assets']);
+  const totalLiabilities = parseToTrillion(getFirstAvailableValue(['総負債', '負債合計', 'Total liabilities']));
   const equity = parseToTrillion(getFirstAvailableValue([
-    '資本合計', '純資産合計', '純資産', '株主資本合計', '普通株主資本の合計'
+    '資本合計', '純資産合計', '純資産', '株主資本合計', '普通株主資本の合計',
+    "Total stockholders' equity", 'Total shareholders equity', 'Total equity'
   ]));
 
   // Google Financeに「流動負債合計」がない場合は、取得可能な内訳から概算する。
-  const directCurrentLiabilities = getFirstAvailableValue(['流動負債合計', '流動負債']);
+  const directCurrentLiabilities = getFirstAvailableValue(['流動負債合計', '流動負債', 'Total current liabilities', 'Current liabilities']);
   const payables = parseToTrillion(getLatestValue('買掛金の合計'));
   const shortBorrowing = parseToTrillion(getLatestValue('短期借入金'));
   const currentLongTermDebt = parseToTrillion(getLatestValue('一年以内返済長期借入金'));
@@ -467,6 +468,13 @@ function runExtraction() {
   const currentRatio = raw.currentLiabilities > 0 ? ((raw.currentAssets / raw.currentLiabilities) * 100).toFixed(1) : "-";
   const fixedRatio = raw.equity > 0 ? ((raw.fixedAssets / raw.equity) * 100).toFixed(1) : "-";
   const equityRatio = raw.totalAssets > 0 ? ((raw.equity / raw.totalAssets) * 100).toFixed(1) : "-";
+  const currency = document.getElementById('inputCurrency').value;
+  const unitValue = Number(document.getElementById('inputUnit').value);
+  const displayUnit = currency === 'USD'
+    ? ({1000: 'thousand', 1000000: 'million', 100000000: 'hundred million', 1000000000000: 'trillion'}[unitValue] || 'units')
+    : document.getElementById('inputUnit').selectedOptions[0].textContent;
+  const currencyLabel = currency === 'JPY' ? '円' : currency;
+  const formatAmount = value => `${(value * 1000000000000 / unitValue).toFixed(2)} ${displayUnit} ${currencyLabel}`;
 
   document.getElementById('mCurrentRatio').textContent = currentRatio + "%";
   document.getElementById('mFixedRatio').textContent = fixedRatio + "%";
@@ -502,20 +510,20 @@ function runExtraction() {
   const flPct = ((raw.fixedLiabilities / raw.totalCredit) * 100).toFixed(1);
   const eqPct = ((raw.equity / raw.totalCredit) * 100).toFixed(1);
 
-  document.getElementById('vCurrentAssets').textContent = raw.currentAssets.toFixed(2) + "兆円";
+  document.getElementById('vCurrentAssets').textContent = formatAmount(raw.currentAssets);
   document.getElementById('pCurrentAssets').textContent = `(${caPct}%)`;
-  document.getElementById('vFixedAssets').textContent = raw.fixedAssets.toFixed(2) + "兆円";
+  document.getElementById('vFixedAssets').textContent = formatAmount(raw.fixedAssets);
   document.getElementById('pFixedAssets').textContent = `(${faPct}%)`;
 
-  document.getElementById('vCurrentLiab').textContent = raw.currentLiabilities.toFixed(2) + "兆円";
+  document.getElementById('vCurrentLiab').textContent = formatAmount(raw.currentLiabilities);
   document.getElementById('pCurrentLiab').textContent = `(${clPct}%)`;
-  document.getElementById('vFixedLiab').textContent = raw.fixedLiabilities.toFixed(2) + "兆円";
+  document.getElementById('vFixedLiab').textContent = formatAmount(raw.fixedLiabilities);
   document.getElementById('pFixedLiab').textContent = `(${flPct}%)`;
-  document.getElementById('vEquity').textContent = raw.equity.toFixed(2) + "兆円";
+  document.getElementById('vEquity').textContent = formatAmount(raw.equity);
   document.getElementById('pEquity').textContent = `(${eqPct}%)`;
 
-  document.getElementById('vTotalAssets').textContent = raw.totalAssets.toFixed(2) + "兆円 (100%)";
-  document.getElementById('vTotalLiabEquity').textContent = raw.totalCredit.toFixed(2) + "兆円 (100%)";
+  document.getElementById('vTotalAssets').textContent = formatAmount(raw.totalAssets) + " (100%)";
+  document.getElementById('vTotalLiabEquity').textContent = formatAmount(raw.totalCredit) + " (100%)";
 
   document.getElementById('bCurrentAssets').style.flex = caPct;
   document.getElementById('bFixedAssets').style.flex = faPct;
