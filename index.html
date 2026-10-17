@@ -324,7 +324,8 @@ function parseText(text) {
     let index = -1;
     for (let i = lines.length - 1; i >= 0; i--) {
       const keywordPattern = new RegExp('^' + keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\s|$)');
-      if (keywordPattern.test(lines[i])) {
+      const remainder = lines[i].slice(keyword.length).trim();
+      if (keywordPattern.test(lines[i]) && !(keyword === 'Total liabilities' && remainder.toLowerCase().startsWith('and equity'))) {
         index = i;
         break;
       }
@@ -388,10 +389,15 @@ function parseText(text) {
   const totalAssets = parseToTrillion(getFirstAvailableValue(['総資産', '資産合計', 'Total assets']));
   const directFixedAssets = getFirstAvailableValue(['固定資産合計', '固定資産', '非流動資産合計', '非流動資産', 'Total non-current assets', 'Non-current assets']);
   const totalLiabilities = parseToTrillion(getFirstAvailableValue(['総負債', '負債合計', 'Total liabilities']));
-  const equity = parseToTrillion(getFirstAvailableValue([
+  const totalLiabilitiesAndEquity = parseToTrillion(getFirstAvailableValue(['負債及び資本合計', '負債・純資産合計', 'Total liabilities and equity']));
+  const reportedEquity = parseToTrillion(getFirstAvailableValue([
     '資本合計', '純資産合計', '純資産', '株主資本合計', '普通株主資本の合計',
     "Total stockholders' equity", 'Total shareholders equity', 'Total equity'
   ]));
+  // 非支配持分などを含む合計がある場合は、負債及び資本合計から負債を差し引く。
+  const equity = totalLiabilitiesAndEquity > 0 && totalLiabilities > 0
+    ? totalLiabilitiesAndEquity - totalLiabilities
+    : reportedEquity;
 
   // Google Financeに「流動負債合計」がない場合は、取得可能な内訳から概算する。
   const directCurrentLiabilities = getFirstAvailableValue(['流動負債合計', '流動負債', 'Total current liabilities', 'Current liabilities']);
