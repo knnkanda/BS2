@@ -34,6 +34,12 @@
       font-size: 13px;
       margin-bottom: 12px;
     }
+    .metadata-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px 14px; margin-bottom: 12px; }
+    .metadata-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 0.82rem; font-weight: bold; color: #475569; }
+    .metadata-grid input, .metadata-grid select { padding: 9px; border: 1px solid #cbd5e1; border-radius: 8px; background: #fff; color: #334155; }
+    .source-note { margin: 0 0 12px; color: #64748b; font-size: 0.78rem; }
+    .metadata-display { margin-top: 8px; color: #64748b; font-size: 0.8rem; }
+    @media (max-width: 600px) { .metadata-grid, .metrics-container, .bs-grid, .bs-footer { grid-template-columns: 1fr; } }
     .btn-primary {
       width: 100%;
       background-color: #2563eb;
@@ -109,11 +115,19 @@
     .bs-footer {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      text-align: center;
+      gap: 16px;
       margin-top: 16px;
-      padding-top: 12px;
       font-weight: bold;
     }
+    .bs-total {
+      padding: 14px 16px;
+      border-radius: 12px;
+      text-align: center;
+      color: white;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    .bs-total-assets { background-color: #047857; }
+    .bs-total-credit { background-color: #b91c1c; }
 
     /* アクションボタン群 */
     .action-buttons {
@@ -167,6 +181,17 @@
 
 <div class="card">
   <h1>📋 B/S テキスト抽出 & ビジュアル化ツール</h1>
+  <div class="metadata-grid">
+    <label>金額単位<select id="inputUnit"><option value="1">円</option><option value="1000">千円</option><option value="1000000" selected>百万円</option><option value="100000000">億円</option><option value="1000000000000">兆円</option></select></label>
+    <label>通貨<select id="inputCurrency"><option value="JPY" selected>日本円（JPY）</option><option value="USD">米ドル（USD）</option><option value="EUR">ユーロ（EUR）</option><option value="OTHER">その他</option></select></label>
+    <label>会計データの年月日<input id="inputAsOfDate" type="date"></label>
+    <label>会計データのURL（任意）<input id="inputSourceUrl" type="url" placeholder="https://example.com/..."/></label>
+    <label>企業名（任意）<input id="inputCompanyName" type="text" placeholder="例：株式会社〇〇"></label>
+    <label>シンボル（任意）<input id="inputSymbol" type="text" placeholder="例：7203 または NYSE:ABC"></label>
+    <label>株価（任意）<input id="inputStockPrice" type="text" placeholder="例：2,500円"></label>
+    <label>時価総額（任意）<input id="inputMarketCap" type="text" placeholder="例：10.5兆円"></label>
+  </div>
+  <p class="source-note">入力項目はすべて任意です。数字は全角・半角のどちらでも入力できます。複数年度の数値がある場合は、各行の右端（最新の数値）だけを使います。</p>
   <textarea id="inputText" placeholder="ここに Google Finance や Yahoo!ファイナンス等のテキストを貼り付けてください..."></textarea>
   <button class="btn-primary" onclick="runExtraction()">データを抽出してグラフ化</button>
 </div>
@@ -201,6 +226,7 @@
       <div class="bs-company-title" id="dispCompany">企業名</div>
       <div class="bs-info-sub" id="dispStockPrice">株価: -- | 時価総額: --</div>
       <div class="bs-subtitle">貸借対照表 (最新期)</div>
+      <div class="metadata-display" id="dispMetadata"></div>
     </div>
 
     <div class="bs-grid">
@@ -239,8 +265,8 @@
     </div>
 
     <div class="bs-footer">
-      <div>資産合計: <span id="vTotalAssets">-</span></div>
-      <div>負債・純資産合計: <span id="vTotalLiabEquity">-</span></div>
+      <div class="bs-total bs-total-assets">資産合計: <span id="vTotalAssets">-</span></div>
+      <div class="bs-total bs-total-credit">負債・純資産合計: <span id="vTotalLiabEquity">-</span></div>
     </div>
   </div>
 
@@ -264,7 +290,10 @@
 let lastExtractedData = null;
 
 function parseText(text) {
-  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const normalizeWidth = value => value
+    .replace(/[０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xfee0))
+    .replace(/，/g, ',').replace(/．/g, '.').replace(/－/g, '-');
+  const lines = text.split('\n').map(l => normalizeWidth(l.trim())).filter(l => l.length > 0);
 
   let companyName = null;
   let stockCode = null;
@@ -291,22 +320,29 @@ function parseText(text) {
   }
 
   function getLatestValue(keyword) {
-    // Google Financeでは科目名が独立した行になるため、類似科目の誤取得を防ぐ。
-    // 「総資産」「総負債」はグラフ凡例にも出るので、詳細表側の最後の一致を使う。
+    // 科目名と数値が同じ行にある決算短信形式、および科目名の次行に数値がある形式に対応する。
     let index = -1;
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i] === keyword) {
+      const keywordPattern = new RegExp('^' + keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?:\\s|$)');
+      if (keywordPattern.test(lines[i])) {
         index = i;
         break;
       }
     }
     if (index === -1) return null;
 
+    const numberPattern = /(?:△|-)?[\d,]+(?:\.\d+)?(?:兆|億)?/g;
+    const inlineValues = lines[index].slice(keyword.length).match(numberPattern);
+    if (inlineValues && inlineValues.length > 0) {
+      // 2列の場合は右側を当期として採用する。
+      return inlineValues[inlineValues.length - 1];
+    }
+
     const values = [];
     for (let i = index + 1; i < lines.length && values.length < 4; i++) {
       const line = lines[i];
       // 割合（例: 2.20%）は金額として扱わない。
-      if (/^-?[\d,]+(\.\d+)?(兆|億)?$/.test(line) || line === '-') {
+      if (/^(?:△|-)?[\d,]+(?:\.\d+)?(?:兆|億)?$/.test(line) || line === '-') {
         values.push(line);
       } else if (values.length > 0) {
         break;
@@ -323,17 +359,21 @@ function parseText(text) {
     return null;
   }
 
+  const inputUnit = Number(document.getElementById('inputUnit').value || 1000000);
+
   function parseToTrillion(valStr) {
     if (!valStr || valStr === '-') return 0;
+    const isNegative = valStr.startsWith('△') || valStr.startsWith('-') || valStr.startsWith('－');
+    valStr = valStr.replace(/^(?:△|-|－)/, '');
     let num = 0;
     if (valStr.includes('兆')) {
       num = parseFloat(valStr.replace('兆', '').replace(/,/g, ''));
     } else if (valStr.includes('億')) {
       num = parseFloat(valStr.replace('億', '').replace(/,/g, '')) / 10000;
     } else {
-      num = parseFloat(valStr.replace(/,/g, '')) || 0;
+      num = (parseFloat(valStr.replace(/,/g, '')) || 0) * inputUnit / 1000000000000;
     }
-    return num;
+    return isNegative ? -num : num;
   }
 
   const sharesStr = getLatestValue('発行済株式数');
@@ -345,9 +385,9 @@ function parseText(text) {
   }
 
   const currentAssets = parseToTrillion(getFirstAvailableValue(['流動資産合計', '流動資産']));
-  const totalAssets = parseToTrillion(getLatestValue('総資産'));
-  const directFixedAssets = getFirstAvailableValue(['固定資産合計', '固定資産']);
-  const totalLiabilities = parseToTrillion(getLatestValue('総負債'));
+  const totalAssets = parseToTrillion(getFirstAvailableValue(['総資産', '資産合計']));
+  const directFixedAssets = getFirstAvailableValue(['固定資産合計', '固定資産', '非流動資産合計', '非流動資産']);
+  const totalLiabilities = parseToTrillion(getFirstAvailableValue(['総負債', '負債合計']));
   const equity = parseToTrillion(getFirstAvailableValue([
     '資本合計', '純資産合計', '純資産', '株主資本合計', '普通株主資本の合計'
   ]));
@@ -392,6 +432,17 @@ function runExtraction() {
   const text = document.getElementById('inputText').value;
   const data = parseText(text);
   const raw = data.raw;
+  // 企業情報はユーザー入力を優先し、未入力なら空欄にする。
+  data.companyName = document.getElementById('inputCompanyName').value.trim();
+  data.stockCode = document.getElementById('inputSymbol').value.trim();
+  data.stockPrice = document.getElementById('inputStockPrice').value.trim();
+  data.marketCap = document.getElementById('inputMarketCap').value.trim();
+  const metadata = {
+    currency: document.getElementById('inputCurrency').value,
+    unit: document.getElementById('inputUnit').selectedOptions[0].textContent,
+    asOfDate: document.getElementById('inputAsOfDate').value || '',
+    sourceUrl: document.getElementById('inputSourceUrl').value.trim()
+  };
 
   document.getElementById('tCurrentLiab').textContent = raw.currentLiabilitiesEstimated
     ? '流動負債（概算）'
@@ -421,8 +472,29 @@ function runExtraction() {
   document.getElementById('mFixedRatio').textContent = fixedRatio + "%";
   document.getElementById('mEquityRatio').textContent = equityRatio + "%";
 
-  document.getElementById('dispCompany').textContent = `${data.companyName} ${data.stockCode ? '(' + data.stockCode + ')' : ''}`;
-  document.getElementById('dispStockPrice').textContent = `株価: ${data.stockPrice} | 時価総額: ${data.marketCap}`;
+  document.getElementById('dispCompany').textContent = [data.companyName, data.stockCode ? `(${data.stockCode})` : ''].filter(Boolean).join(' ');
+  document.getElementById('dispStockPrice').textContent = [
+    data.stockPrice ? `株価: ${data.stockPrice}` : '',
+    data.marketCap ? `時価総額: ${data.marketCap}` : ''
+  ].filter(Boolean).join(' ｜ ');
+  const metadataDisplay = document.getElementById('dispMetadata');
+  metadataDisplay.replaceChildren();
+  const metadataParts = [
+    metadata.asOfDate ? `基準日: ${metadata.asOfDate}` : '',
+    `通貨: ${metadata.currency}`,
+    `金額単位: ${metadata.unit}`
+  ].filter(Boolean);
+  metadataDisplay.append(document.createTextNode(metadataParts.join(' ｜ ')));
+  if (metadata.sourceUrl) {
+    if (metadataParts.length) metadataDisplay.append(document.createElement('br'));
+    metadataDisplay.append(document.createTextNode('出典: '));
+    const sourceLink = document.createElement('a');
+    sourceLink.href = metadata.sourceUrl;
+    sourceLink.target = '_blank';
+    sourceLink.rel = 'noopener noreferrer';
+    sourceLink.textContent = metadata.sourceUrl;
+    metadataDisplay.append(sourceLink);
+  }
 
   const caPct = ((raw.currentAssets / raw.totalAssets) * 100).toFixed(1);
   const faPct = ((raw.fixedAssets / raw.totalAssets) * 100).toFixed(1);
@@ -471,6 +543,7 @@ function runExtraction() {
       totalCredit: raw.totalCredit.toFixed(2) + "兆円"
     },
     currentLiabilitiesEstimated: raw.currentLiabilitiesEstimated,
+    metadata,
     percentages: { caPct, faPct, clPct, flPct, eqPct }
   };
 }
@@ -493,6 +566,11 @@ function downloadMarkdown() {
   if (!lastExtractedData) return;
   const d = lastExtractedData;
   const mdContent = `# 📊 ${d.companyName} (${d.stockCode}) 財務サマリー
+
+- **基準日**: ${d.metadata.asOfDate || '未入力'}
+- **通貨**: ${d.metadata.currency}
+- **金額単位**: ${d.metadata.unit}
+- **出典URL**: ${d.metadata.sourceUrl || '未入力'}
 
 - **株価**: ${d.stockPrice}
 - **時価総額**: ${d.marketCap}
