@@ -184,8 +184,8 @@
 <div class="card">
   <h1>📋 B/S テキスト抽出 & ビジュアル化ツール</h1>
   <div class="metadata-grid">
-    <label>金額単位<select id="inputUnit"><option value="1">円</option><option value="1000">千円</option><option value="1000000" selected>百万円</option><option value="100000000">億円</option><option value="1000000000000">兆円</option></select></label>
     <label>通貨<select id="inputCurrency"><option value="JPY" selected>日本円（JPY）</option><option value="USD">米ドル（USD）</option><option value="EUR">ユーロ（EUR）</option><option value="OTHER">その他</option></select></label>
+    <label>金額単位<select id="inputUnit"><option value="1">円</option><option value="1000">千円</option><option value="1000000" selected>百万円</option><option value="100000000">億円</option><option value="1000000000000">兆円</option></select></label>
     <label>会計データの年月日<input id="inputAsOfDate" type="date"></label>
     <label>会計データのURL（任意）<input id="inputSourceUrl" type="url" placeholder="https://example.com/..."/></label>
     <label>企業名（任意）<input id="inputCompanyName" type="text" placeholder="例：株式会社〇〇"></label>
@@ -324,15 +324,28 @@ function clearDraft() {
   });
   document.getElementById('inputUnit').value = '1000000';
   document.getElementById('inputCurrency').value = 'JPY';
+  updateUnitLabels();
+}
+
+function updateUnitLabels() {
+  const currency = document.getElementById('inputCurrency').value;
+  const labels = currency === 'JPY'
+    ? {1: '円', 1000: '千円', 1000000: '百万円', 100000000: '億円', 1000000000000: '兆円'}
+    : {1: 'units', 1000: 'thousand', 1000000: 'million', 100000000: 'hundred million', 1000000000000: 'trillion'};
+  Array.from(document.getElementById('inputUnit').options).forEach(option => {
+    option.textContent = labels[option.value];
+  });
 }
 
 window.addEventListener('DOMContentLoaded', () => {
   restoreDraft();
+  updateUnitLabels();
   DRAFT_FIELD_IDS.forEach(id => {
     const element = document.getElementById(id);
     if (element) element.addEventListener('input', saveDraft);
     if (element) element.addEventListener('change', saveDraft);
   });
+  document.getElementById('inputCurrency').addEventListener('change', updateUnitLabels);
 });
 
 function parseText(text) {
